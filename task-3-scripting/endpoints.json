@@ -1,0 +1,17 @@
+{
+  "endpoints": [
+    {
+      "name": "Task 1 application",
+      "url": "http://localhost:3030/health",
+      "expected_status": 200,
+      "max_attempts": 3,
+      "backoff_seconds": 1,
+      "timeout_seconds": 5
+    },
+    {
+      "name": "Expected not-found example",
+      "url": "https://example.com/missing",
+      "expected_status": 404
+    }
+  ]
+}
