@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+
+install -d -m 0755 /opt/assessment-app
+echo '${application_source_b64}' | base64 --decode > /opt/assessment-app/server.py
+chmod 0644 /opt/assessment-app/server.py
+
+cat > /etc/systemd/system/assessment-app.service <<'SERVICE'
+[Unit]
+Description=Assessment web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PORT=${app_port}
+Environment=PROJECT=${project}
+Environment=ENVIRONMENT=${environment}
+ExecStart=/usr/bin/python3 /opt/assessment-app/server.py
+Restart=always
+RestartSec=5
+User=nobody
+Group=nobody
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable --now assessment-app
