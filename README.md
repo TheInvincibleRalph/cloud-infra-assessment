@@ -16,6 +16,3 @@ This repository contains three independent tasks:
 - GitHub repository access
 
 Each task README contains its setup, design decisions, assumptions, and cleanup commands.
-
-Do not commit credentials, `*.tfstate`, `*.tfvars`, `backend.hcl`, or Terraform plan files. Provider `.terraform.lock.hcl` files should be committed.
-
