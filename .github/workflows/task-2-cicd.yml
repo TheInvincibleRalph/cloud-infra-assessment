@@ -2,7 +2,7 @@ name: Task 2 - Test, Scan, and Publish
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
