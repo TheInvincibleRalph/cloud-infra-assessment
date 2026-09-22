@@ -1,97 +1,34 @@
-# Task 2: Container Build and Delivery Pipeline
+# Task 2: Container CI/CD Pipeline
 
 ## Overview
 
-This task provides a small Go REST API and a GitHub Actions pipeline that tests it, builds a non-root multi-stage container image, blocks images with fixable `HIGH` or `CRITICAL` vulnerabilities, and pushes successful commit-addressed images to Amazon ECR.
+A small Go REST API is tested, built as a non-root multi-stage image, scanned with Trivy, and pushed to Amazon ECR by GitHub Actions. Go was selected because it produces a small static binary and makes the build/runtime stage separation clear.
 
-Go was selected because it produces a self-contained binary, makes the multi-stage build meaningful, supports dependency-free unit testing, and allows the runtime image to contain no compiler, package manager, shell, or language runtime.
-
-## Repository Structure
-
-```text
-task-2-cicd/
-├── cmd/api/main.go                  # Process startup and graceful shutdown
-├── internal/httpapi/
-│   ├── handler.go                   # HTTP routes
-│   └── handler_test.go              # Unit tests using httptest
-├── infrastructure/                  # ECR and GitHub OIDC IAM role
-├── .dockerignore
-├── Dockerfile                       # Test, build, and non-root runtime stages
-├── Makefile                         # Local developer commands
-├── go.mod
-└── README.md
-
-.github/workflows/task-2-cicd.yml    # Root location required by GitHub
-```
-
-## Application
-
-The API listens on `PORT`, defaulting to `8080`:
-
-- `GET /` returns the service name and build version.
-- `GET /health` returns `{"status":"healthy"}`.
-- `GET /api/version` returns the version injected during image compilation.
-
-The server defines request timeouts and handles `SIGINT` and `SIGTERM` for graceful shutdown. Handlers are independent from the network listener, so tests use Go's fast in-memory `httptest` package.
+Endpoints: `GET /`, `GET /health`, and `GET /api/version`.
 
 ## Pipeline Flow
 
 ```text
-Push to main or manual dispatch
-              |
-              v
-      Run Go unit tests
-              |
-              v
- Build multi-stage container image
-              |
-              v
- Trivy scan: HIGH and CRITICAL
-              |
-       failure stops pipeline
-              |
-              v
- Assume AWS role through GitHub OIDC
-              |
-              v
+Push to delivery branch
+        |
+     Go tests
+        |
+ Multi-stage image build
+        |
+ Trivy HIGH/CRITICAL gate
+        |
+ GitHub OIDC -> AWS role
+        |
  Push commit-SHA image to ECR
 ```
 
-The push step is last, so failed tests, builds, or vulnerability scans cannot publish an image. The job receives permission to request a GitHub OIDC token and exchanges it for short-lived AWS credentials; no AWS access keys are stored in GitHub.
+The ECR push is last, so failed tests, builds, or scans cannot publish an image.
 
-## Requirement Coverage
+## Setup and Run
 
-- The `Dockerfile` uses separate test/build stages and a Distroless runtime stage.
-- The final stage declares `USER nonroot:nonroot` and contains only the compiled binary.
-- Three unit tests cover health, version, and unknown-route behavior.
-- The workflow runs on every push to `main` and can also be dispatched manually.
-- Trivy exits with code 1 when a fixable `HIGH` or `CRITICAL` vulnerability is found.
-- AWS authentication and ECR push occur only after all earlier gates succeed.
-- Successful images use immutable full Git commit SHA tags.
-- Promotion reuses the tested image digest rather than rebuilding source.
+Prerequisites: Go 1.25+, Docker, Trivy, Terraform 1.10+, AWS CLI v2, and GitHub CLI.
 
-## Docker Design
-
-The Dockerfile has three named stages:
-
-1. `test` copies the source and runs `go test -race ./...`.
-2. `build` compiles a static Linux binary and injects the Git commit as its version.
-3. `runtime` copies only that binary into Distroless and runs it as the built-in non-root user.
-
-CI also runs tests before `docker build`. This duplication gives fast, visible test feedback while ensuring that a direct local image build cannot bypass tests.
-
-The runtime has no shell, compiler, source, or package manager. This reduces size and attack surface, but interactive debugging is intentionally limited; production debugging should use logs, metrics, traces, or an ephemeral debug container.
-
-## Prerequisites
-
-- Go 1.25 or later.
-- Docker with BuildKit.
-- Trivy for local vulnerability scanning.
-- Terraform 1.10 or later and AWS CLI v2 for provisioning ECR and IAM.
-- AWS permissions to manage ECR, IAM roles/policies, and the account-level GitHub OIDC provider.
-- A GitHub repository whose delivery branch is `main`.
-
-## Run Locally
+Run locally:
 
 ```bash
 cd task-2-cicd
@@ -101,55 +38,31 @@ make scan IMAGE_TAG=local
 make run IMAGE_TAG=local
 ```
 
-In another terminal:
+Provision ECR and the GitHub OIDC role:
 
 ```bash
-curl http://localhost:8080/
-curl http://localhost:8080/health
-curl http://localhost:8080/api/version
-```
-
-Confirm the configured runtime identity:
-
-```bash
-docker inspect assessment-api:local --format '{{.Config.User}}'
-```
-
-Expected output: `nonroot:nonroot`.
-
-## Provision ECR and GitHub OIDC
-
-The Terraform root under `infrastructure/` creates:
-
-- A private AES-256 encrypted ECR repository with immutable tags.
-- ECR scan-on-push as defense in depth alongside the blocking Trivy scan.
-- A lifecycle rule retaining the newest 30 images.
-- A GitHub OIDC identity provider when the account does not already have one.
-- A branch-restricted IAM role allowed to push only to this ECR repository.
-
-Authenticate to AWS, then run:
-
-```bash
-cd task-2-cicd/infrastructure
-cp terraform.tfvars.example terraform.tfvars
+cd infra
+export AWS_PROFILE="terraform-project"
+export TF_VAR_owner="Raphael Adesegun" # or your name
+export TF_VAR_github_repository="TheInvincibleRalph/cloud-infra-assessment"
+export TF_VAR_github_subject_claim="repo:TheInvincibleRalph@139259364/cloud-infra-assessment@1380336660:ref:refs/heads/main"
 terraform init
 terraform fmt -check
 terraform validate
-terraform plan -var-file=terraform.tfvars -out=task-2.tfplan
-terraform apply task-2.tfplan
-terraform output
+terraform plan
+terraform apply
 ```
 
-An AWS account can contain only one IAM OIDC provider for GitHub's token URL. If one already exists, set:
+Configure GitHub Actions:
 
-```hcl
-create_github_oidc_provider       = false
-existing_github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+```bash
+gh secret set AWS_ROLE_ARN --body "$(terraform output -raw github_actions_role_arn)"
+gh variable set AWS_REGION --body "$(terraform output -raw aws_region)"
+gh variable set AWS_ACCOUNT_ID --body "$(aws sts get-caller-identity --query Account --output text)"
+gh variable set ECR_REPOSITORY --body "$(terraform output -raw ecr_repository_name)"
 ```
 
-The role's subject claim defaults to the repository and `main` branch. GitHub repositories using enhanced organization/repository ID claims can override `github_subject_claim` with the exact claim used by that repository.
-
-## Configure GitHub
+OR
 
 In **Settings > Secrets and variables > Actions**, configure one repository secret:
 
@@ -161,70 +74,72 @@ Configure three repository variables:
 - `AWS_ACCOUNT_ID`: the expected 12-digit AWS account ID.
 - `ECR_REPOSITORY`: Terraform output `ecr_repository_name`.
 
-The workflow intentionally listens to `main`, as required. This repository currently uses `master`; rename and configure the default branch as `main` before expecting normal pushes to trigger it.
+The workflow file is `.github/workflows/task-2-cicd.yml`.
 
-## Vulnerability Policy
 
-Trivy scans the assembled local image before AWS authentication or push with severity `HIGH,CRITICAL`, `ignore-unfixed: true`, and `exit-code: 1`. A fixable high or critical vulnerability therefore fails the job. Unfixed findings remain visible but do not block because the team cannot remediate them directly; remove `ignore-unfixed` for a stricter policy that blocks every high or critical finding.
+## Pipeline Blockers Solved
 
-ECR scan-on-push is an additional registry-side signal, not the pipeline gate. Trivy is the gate because it can fail before publication.
+The pipeline initially failed at the AWS authentication step with:
 
-## Staging-to-Production Promotion
+```text
+Not authorized to perform sts:AssumeRoleWithWebIdentity
+```
 
-Every successful image is tagged with the complete Git commit SHA. ECR tag immutability prevents overwriting that tag. Promotion should reuse the same digest:
+GitHub Actions successfully created an OIDC token, but AWS rejected it because the token's `sub` claim did not exactly match the IAM role trust policy. The original policy expected GitHub's older name-based subject:
 
-1. Deploy the commit-SHA image to staging.
-2. Run smoke, integration, and acceptance tests.
-3. Require approval through a protected GitHub `production` environment.
-4. Resolve and record the staging image digest from ECR.
-5. Deploy the exact `repository@sha256:...` digest to production.
-6. Record the digest, source commit, approver, and deployment result.
+```text
+repo:TheInvincibleRalph/cloud-infra-assessment:ref:refs/heads/main
+```
 
-A separate release workflow should accept an existing digest, verify it passed staging, assume an environment-specific production role, and deploy it without invoking `docker build` again. This ensures production receives the exact artifact that was tested.
+New GitHub repositories use an immutable subject containing the permanent numeric owner and repository IDs:
 
-## Decisions and Trade-offs
+```text
+repo:TheInvincibleRalph@139259364/cloud-infra-assessment@1380336660:ref:refs/heads/main
+```
 
-**Go standard library:** Keeps dependencies and attack surface small. A larger API would likely add structured routing, validation, observability, and generated API documentation.
+I retrieved those IDs from the GitHub repository metadata and then supplied the exact immutable subject to Terraform:
 
-**Distroless runtime:** Provides a small non-root image without a shell or package manager. Security improves at the cost of interactive debugging convenience.
+```bash
+export TF_VAR_github_subject_claim="repo:TheInvincibleRalph@139259364/cloud-infra-assessment@1380336660:ref:refs/heads/main"
+terraform plan
+terraform apply
+```
 
-**OIDC instead of AWS keys:** Eliminates long-lived GitHub credentials. The trust policy is restricted to one repository and branch, but initial IAM federation setup is required.
+## Promotion to Production
 
-**Immutable SHA tags:** Make releases traceable and prevent overwrites. Friendly release tags can be aliases, but deployments should record the digest.
+Deploy the commit-SHA image to staging, run acceptance tests, require approval, and deploy the same ECR digest (`repository@sha256:...`) to production. Do not rebuild between staging and production.
 
-**One sequential job:** Makes the success-only push rule unambiguous. Larger pipelines could parallelize independent checks while retaining a final gated publication job.
+## Design Decisions and Trade-offs
 
-**Trivy plus ECR scanning:** Trivy blocks before publishing; ECR provides continuing registry visibility. The overlap is intentional defense in depth.
+- **Multi-stage Distroless image:** Final image contains only the Go binary and runs as `nonroot`; debugging is less convenient because there is no shell.
+- **Trivy before push:** Fixable HIGH/CRITICAL findings fail the workflow. ECR scan-on-push provides additional registry visibility.
+- **GitHub OIDC:** Uses short-lived credentials instead of permanent AWS keys, but requires an IAM provider and trust policy.
+- **Immutable SHA tags:** Provide source traceability and prevent overwrites.
+- **Sequential pipeline:** Keeps the success-only push rule obvious; a larger pipeline could parallelize independent checks.
+
+With more time, add a real staging deployment, protected production environment, SBOM, provenance, and image signing.
 
 ## Assumptions
 
-- ECR and the OIDC role exist before the first workflow run.
-- GitHub-hosted Ubuntu runners and public base images are allowed.
-- `main` is the assessment delivery branch.
-- The AWS account either has no GitHub OIDC provider or its existing ARN is supplied.
-- Deployment to a runtime platform is outside this task; the required deployment action is publication of a verified deployable image to ECR.
+- Publishing a verified image to ECR satisfies the deployment requirement.
+- GitHub-hosted runners can access public base images and vulnerability databases.
+- The GitHub OIDC provider is created once per AWS account or an existing ARN is supplied.
 
 ## Cleanup
 
-The ECR repository does not enable force deletion. Delete its images deliberately before destroying infrastructure:
+Delete images, then destroy the Terraform stack:
 
 ```bash
 aws ecr list-images \
   --repository-name cloud-engineer-assessment/assessment-api \
-  --region us-east-2 \
-  --query 'imageIds[*]' \
-  --output json > /tmp/task-2-image-ids.json
-
+  --query 'imageIds[*]' --output json > /tmp/task-2-images.json
 aws ecr batch-delete-image \
   --repository-name cloud-engineer-assessment/assessment-api \
-  --region us-east-2 \
-  --image-ids file:///tmp/task-2-image-ids.json
-
-cd task-2-cicd/infrastructure
-terraform destroy -var-file=terraform.tfvars
+  --image-ids file:///tmp/task-2-images.json
+cd task-2-cicd/infra
+terraform destroy
 ```
 
-If the OIDC provider is shared, provision this stack with `create_github_oidc_provider = false`; never delete a provider used by other repositories.
 
 ## What I Would Add With More Time
 
@@ -235,3 +150,4 @@ If the OIDC provider is shared, provision this stack with `create_github_oidc_pr
 - Static analysis, license policy, and secret scanning.
 - Multi-architecture images when both AMD64 and ARM64 runtimes are needed.
 
+Do not delete the GitHub OIDC provider if another repository uses it.
