@@ -43,7 +43,7 @@ Provision ECR and the GitHub OIDC role:
 ```bash
 cd infra
 export AWS_PROFILE="terraform-project"
-export TF_VAR_owner="Raphael Adesegun" # or your name
+export TF_VAR_owner="Raphael Adesegun"
 export TF_VAR_github_repository="TheInvincibleRalph/cloud-infra-assessment"
 export TF_VAR_github_subject_claim="repo:TheInvincibleRalph@139259364/cloud-infra-assessment@1380336660:ref:refs/heads/main"
 terraform init
