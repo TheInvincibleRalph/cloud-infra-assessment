@@ -47,7 +47,7 @@ Exit codes:
 
 ## Production Extension and Limitations
 
-For production, use multi-region probes with Prometheus Blackbox Exporter, CloudWatch Synthetics, or Datadog Synthetics. Store historical latency and availability metrics, define SLOs, and alert through Alertmanager or PagerDuty only after sustained or multi-region failures. Manage checks and alerts through Terraform and inject authenticated-check credentials from a secret manager.
+For production, I'd use multi-region probes with Prometheus Blackbox Exporter, CloudWatch Synthetics, or Datadog Synthetics. Store historical latency and availability metrics, define SLOs, and alert through Alertmanager or PagerDuty only after sustained or multi-region failures. Manage checks and alerts through Terraform and inject authenticated-check credentials from a secret manager.
 
 The script has no history, distributed probing, TLS-expiry checks, response-body validation, alert deduplication, or concurrency. It is appropriate as a pipeline gate or lightweight cron check, not a complete monitoring platform.
 
