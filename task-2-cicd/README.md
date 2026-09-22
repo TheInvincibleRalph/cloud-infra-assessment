@@ -109,7 +109,7 @@ terraform apply
 
 ## Promotion to Production
 
-Deploy the commit-SHA image to staging, run acceptance tests, require approval, and deploy the same ECR digest (`repository@sha256:...`) to production. Do not rebuild between staging and production.
+I would deploy the commit-SHA image to staging, run acceptance tests, require approval, and deploy the same ECR digest (`repository@sha256:...`) to production. I won't rebuild between staging and production.
 
 ## Design Decisions and Trade-offs
 
@@ -118,8 +118,6 @@ Deploy the commit-SHA image to staging, run acceptance tests, require approval, 
 - **GitHub OIDC:** Uses short-lived credentials instead of permanent AWS keys, but requires an IAM provider and trust policy.
 - **Immutable SHA tags:** Provide source traceability and prevent overwrites.
 - **Sequential pipeline:** Keeps the success-only push rule obvious; a larger pipeline could parallelize independent checks.
-
-With more time, add a real staging deployment, protected production environment, SBOM, provenance, and image signing.
 
 ## Assumptions
 
@@ -151,5 +149,3 @@ terraform destroy
 - Dependabot and action references pinned to full commit SHAs.
 - Static analysis, license policy, and secret scanning.
 - Multi-architecture images when both AMD64 and ARM64 runtimes are needed.
-
-Do not delete the GitHub OIDC provider if another repository uses it.
