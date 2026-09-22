@@ -1,0 +1,8 @@
+.git
+.github
+.terraform
+infrastructure
+README.md
+*.tfstate*
+*.tfplan
+
