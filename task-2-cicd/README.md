@@ -77,7 +77,9 @@ Configure three repository variables:
 The workflow file is `.github/workflows/task-2-cicd.yml`.
 
 
-## Pipeline Blockers Solved
+## Failed Pipeline
+
+![pipeline](./failedaction.png)
 
 The pipeline initially failed at the AWS authentication step with:
 
