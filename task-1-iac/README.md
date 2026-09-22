@@ -62,7 +62,7 @@ terraform output -raw application_url
 
 Verify:
 
-[webapp](webapp.png)
+![webapp](webapp.png)
 
 ## Design Decisions and Trade-offs
 
